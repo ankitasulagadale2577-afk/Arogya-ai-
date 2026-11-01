@@ -77,9 +77,15 @@ Essential Rules:
     let replyText = "";
 
     if (geminiKey) {
-      // Use Gemini API
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-      
+      // Use Gemini API with robust model cascade
+      const geminiModels = [
+        "gemini-3.5-flash",
+        "gemini-3.8-flash",
+        "gemini-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite"
+      ];
+
       const contents = [
         {
           role: "user",
@@ -91,25 +97,37 @@ Essential Rules:
         }))
       ];
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            maxOutputTokens: 800,
-            temperature: 0.4,
-          }
-        })
-      });
+      let lastErr = "";
+      for (const model of geminiModels) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents,
+              generationConfig: {
+                maxOutputTokens: 800,
+                temperature: 0.3,
+              }
+            })
+          });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error: ${response.status} - ${errorText}`);
+          if (response.ok) {
+            const data = await response.json();
+            replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            if (replyText) break;
+          } else {
+            lastErr = await response.text();
+          }
+        } catch (e: any) {
+          lastErr = e.message;
+        }
       }
 
-      const data = await response.json();
-      replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "I was unable to formulate a response.";
+      if (!replyText) {
+        throw new Error(`Gemini API Error: ${lastErr || "Failed to generate content"}`);
+      }
 
     } else if (openaiKey) {
       // Use OpenAI API

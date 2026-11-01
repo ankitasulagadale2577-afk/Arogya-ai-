@@ -40,7 +40,8 @@ const LANGUAGE_MAP = {
 };
 
 app.get("/api/health", (_req, res) => {
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.AI_API_KEY;
+  const rawKey = process.env.GEMINI_API_KEY || process.env.AI_API_KEY;
+  const geminiKey = rawKey && !rawKey.includes("your_gemini") ? rawKey.trim() : null;
   const openaiKey = process.env.OPENAI_API_KEY;
   res.json({
     status: "ok",
@@ -93,52 +94,57 @@ Essential Rules:
     let replyText = "";
 
     if (geminiKey) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const geminiModels = [
+        "gemini-3.5-flash",
+        "gemini-3.8-flash",
+        "gemini-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite"
+      ];
+
       const contents = messages.map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content || m.text || "" }]
       }));
 
-      let response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents,
-          generationConfig: {
-            maxOutputTokens: 800,
-            temperature: 0.3,
+      let lastErr = "";
+      let lastStatus = 500;
+
+      for (const model of geminiModels) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              contents,
+              generationConfig: {
+                maxOutputTokens: 800,
+                temperature: 0.3,
+              }
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            if (replyText) break;
+          } else {
+            lastStatus = response.status;
+            lastErr = await response.text();
           }
-        })
-      });
-
-      if (!response.ok && response.status === 404) {
-        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-        response = await fetch(fallbackUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: {
-              maxOutputTokens: 800,
-              temperature: 0.3,
-            }
-          })
-        });
+        } catch (e) {
+          lastErr = e.message;
+        }
       }
 
-      if (!response.ok) {
-        const errorData = await response.text();
-        return res.status(response.status).json({
-          error: `AI provider error: ${response.status}`,
-          details: errorData
+      if (!replyText) {
+        return res.status(lastStatus).json({
+          error: `AI provider error: ${lastStatus}`,
+          details: lastErr
         });
       }
-
-      const data = await response.json();
-      replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Unable to formulate a response.";
-
     } else if (openaiKey) {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",

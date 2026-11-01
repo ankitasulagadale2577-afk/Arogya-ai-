@@ -11,23 +11,34 @@ const createUserIcon = () =>
   L.divIcon({
     className: "leaflet-user-marker",
     html: `<div style="
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
       background: #0866f5;
       border: 3px solid white;
       border-radius: 50%;
-      box-shadow: 0 0 0 6px rgba(8, 102, 245, 0.3), 0 3px 8px rgba(0,0,0,0.3);
-    "></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
+      box-shadow: 0 0 0 8px rgba(8, 102, 245, 0.25), 0 3px 8px rgba(0,0,0,0.3);
+      position: relative;
+    ">
+      <div style="
+        width: 8px;
+        height: 8px;
+        background: white;
+        border-radius: 50%;
+        position: absolute;
+        top: 5px;
+        left: 5px;
+      "></div>
+    </div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
   });
 
 const createHospitalIcon = (isSelected = false) =>
   L.divIcon({
     className: "leaflet-facility-marker",
     html: `<div style="
-      width: ${isSelected ? "34px" : "28px"};
-      height: ${isSelected ? "34px" : "28px"};
+      width: ${isSelected ? "36px" : "28px"};
+      height: ${isSelected ? "36px" : "28px"};
       background: ${isSelected ? "#0866f5" : "#e63d58"};
       color: white;
       border: 2px solid white;
@@ -35,18 +46,19 @@ const createHospitalIcon = (isSelected = false) =>
       display: grid;
       place-items: center;
       font-weight: bold;
-      font-size: 16px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      font-size: ${isSelected ? "18px" : "15px"};
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
       transition: all 0.2s ease;
+      cursor: pointer;
     ">
       <span>+</span>
     </div>`,
-    iconSize: [isSelected ? 34 : 28, isSelected ? 34 : 28],
-    iconAnchor: [isSelected ? 17 : 14, isSelected ? 17 : 14],
+    iconSize: [isSelected ? 36 : 28, isSelected ? 36 : 28],
+    iconAnchor: [isSelected ? 18 : 14, isSelected ? 18 : 14],
   });
 
 export default function LeafletMap({
-  center = [18.5204, 73.8567], // Default Pune / India coords
+  center = [18.5204, 73.8567],
   zoom = 13,
   userLocation = null,
   hospitals = [],
@@ -76,10 +88,23 @@ export default function LeafletMap({
 
       markersLayerRef.current = L.layerGroup().addTo(map);
       mapInstanceRef.current = map;
+
+      // Force recalculation of container dimensions
+      setTimeout(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      }, 250);
+
+      const resizeObserver = new ResizeObserver(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      });
+      resizeObserver.observe(mapContainerRef.current);
     }
 
     return () => {
-      // Clean up map when unmounting
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -92,6 +117,11 @@ export default function LeafletMap({
   useEffect(() => {
     if (mapInstanceRef.current && center) {
       mapInstanceRef.current.setView(center, zoom);
+      setTimeout(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      }, 100);
     }
   }, [center, zoom]);
 
@@ -105,7 +135,7 @@ export default function LeafletMap({
     if (userLocation && userLocation.lat && userLocation.lon) {
       const userMarker = L.marker([userLocation.lat, userLocation.lon], {
         icon: createUserIcon(),
-      }).bindPopup("<b>Your Location</b>");
+      }).bindPopup("<b>Your Current Location</b>");
       markersLayerRef.current.addLayer(userMarker);
     }
 
@@ -118,14 +148,28 @@ export default function LeafletMap({
         icon: createHospitalIcon(isSelected),
       });
 
+      const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lon}`;
+
       const popupContent = `
-        <div style="font-family: inherit; font-size: 13px; line-height: 1.4; padding: 2px;">
-          <strong style="color: #142f59; font-size: 14px;">${h.name}</strong>
-          <div style="color: #6680a1; font-size: 11px; margin: 4px 0;">${h.address}</div>
-          <div style="color: #0866f5; font-weight: bold; font-size: 11px;">
-            ${h.distance ? h.distance.toFixed(1) + " km away" : ""} ${h.emergency ? "• Emergency Ready" : ""}
+        <div style="font-family: inherit; font-size: 13px; line-height: 1.4; padding: 2px; min-width: 200px;">
+          <strong style="color: #142f59; font-size: 14px; display: block; margin-bottom: 4px;">${h.name}</strong>
+          <div style="color: #6680a1; font-size: 11px; margin-bottom: 6px;">${h.address}</div>
+          <div style="color: #0866f5; font-weight: bold; font-size: 12px; margin-bottom: 4px;">
+            ${h.distance ? h.distance.toFixed(1) + " km away" : ""} ${h.emergency ? "• 🚨 24/7 Emergency" : ""}
           </div>
-          ${h.phone ? `<div style="margin-top: 4px;">📞 <a href="tel:${h.phone}" style="color: #e63d58; font-weight: bold;">${h.phone}</a></div>` : ""}
+          ${h.phone ? `<div style="margin: 4px 0;">📞 <a href="tel:${h.phone}" style="color: #e63d58; font-weight: bold;">${h.phone}</a></div>` : ""}
+          <div style="margin-top: 8px;">
+            <a href="${directionsUrl}" target="_blank" rel="noreferrer" style="
+              display: inline-block;
+              background: #0866f5;
+              color: white;
+              padding: 5px 10px;
+              border-radius: 6px;
+              text-decoration: none;
+              font-size: 11px;
+              font-weight: bold;
+            ">Get Directions →</a>
+          </div>
         </div>
       `;
 
@@ -160,7 +204,7 @@ export default function LeafletMap({
       style={{
         width: "100%",
         height: "100%",
-        minHeight: "440px",
+        minHeight: "450px",
         borderRadius: "16px",
         overflow: "hidden",
         zIndex: 1,

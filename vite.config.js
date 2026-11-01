@@ -99,51 +99,56 @@ Essential Rules:
             let replyText = '';
 
             if (geminiKey) {
-              const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+              const geminiModels = [
+                'gemini-3.5-flash',
+                'gemini-3.8-flash',
+                'gemini-flash-latest',
+                'gemini-2.5-flash',
+                'gemini-2.5-flash-lite'
+              ];
+
               const contents = messages.map(m => ({
                 role: m.role === 'assistant' ? 'model' : 'user',
                 parts: [{ text: m.content || m.text || '' }]
               }));
 
-              let geminiRes = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  systemInstruction: { parts: [{ text: systemPrompt }] },
-                  contents,
-                  generationConfig: {
-                    maxOutputTokens: 800,
-                    temperature: 0.3
-                  }
-                })
-              });
+              let lastErr = '';
+              let lastStatus = 500;
 
-              // Fallback to gemini-1.5-flash if 2.5 is unavailable
-              if (!geminiRes.ok && geminiRes.status === 404) {
-                const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-                geminiRes = await fetch(fallbackUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    systemInstruction: { parts: [{ text: systemPrompt }] },
-                    contents,
-                    generationConfig: {
-                      maxOutputTokens: 800,
-                      temperature: 0.3
-                    }
-                  })
-                });
+              for (const model of geminiModels) {
+                try {
+                  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+                  const geminiRes = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      systemInstruction: { parts: [{ text: systemPrompt }] },
+                      contents,
+                      generationConfig: {
+                        maxOutputTokens: 800,
+                        temperature: 0.3
+                      }
+                    })
+                  });
+
+                  if (geminiRes.ok) {
+                    const data = await geminiRes.json();
+                    replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                    if (replyText) break;
+                  } else {
+                    lastStatus = geminiRes.status;
+                    lastErr = await geminiRes.text();
+                  }
+                } catch (e) {
+                  lastErr = e.message;
+                }
               }
 
-              if (!geminiRes.ok) {
-                const errData = await geminiRes.text();
-                res.statusCode = geminiRes.status;
-                res.end(JSON.stringify({ error: `Gemini API error: ${geminiRes.status}`, details: errData }));
+              if (!replyText) {
+                res.statusCode = lastStatus;
+                res.end(JSON.stringify({ error: `Gemini API error: ${lastStatus}`, details: lastErr }));
                 return;
               }
-
-              const data = await geminiRes.json();
-              replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response formulated.';
             } else if (openaiKey) {
               const response = await fetch("https://api.openai.com/v1/chat/completions", {
                 method: "POST",

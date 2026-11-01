@@ -67,24 +67,76 @@ export default function HospitalsPage() {
     }
   };
 
-  // Load initial hospitals for default center
+  // Load initial hospitals (auto-detect user location if available, otherwise default to Pune)
   useEffect(() => {
     let active = true;
+
     async function init() {
-      const { hospitals: results, error: apiErr } = await fetchNearbyHospitals(
-        DEFAULT_CENTER.lat,
-        DEFAULT_CENTER.lon,
-        5000,
-        "all"
-      );
-      if (!active) return;
-      setLoading(false);
-      if (apiErr) {
-        setError(apiErr);
+      if (typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            if (!active) return;
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            setUserLocation({ lat, lon });
+            setCenter([lat, lon]);
+
+            const revName = await reverseGeocode(lat, lon);
+            if (active && revName) {
+              setLocationName(revName);
+            }
+
+            if (active) {
+              const { hospitals: results, error: apiErr } = await fetchNearbyHospitals(
+                lat,
+                lon,
+                5000,
+                "all"
+              );
+              if (!active) return;
+              setLoading(false);
+              if (apiErr) {
+                setError(apiErr);
+              } else {
+                setHospitals(results);
+              }
+            }
+          },
+          async () => {
+            if (!active) return;
+            const { hospitals: results, error: apiErr } = await fetchNearbyHospitals(
+              DEFAULT_CENTER.lat,
+              DEFAULT_CENTER.lon,
+              5000,
+              "all"
+            );
+            if (!active) return;
+            setLoading(false);
+            if (apiErr) {
+              setError(apiErr);
+            } else {
+              setHospitals(results);
+            }
+          },
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+        );
       } else {
-        setHospitals(results);
+        const { hospitals: results, error: apiErr } = await fetchNearbyHospitals(
+          DEFAULT_CENTER.lat,
+          DEFAULT_CENTER.lon,
+          5000,
+          "all"
+        );
+        if (!active) return;
+        setLoading(false);
+        if (apiErr) {
+          setError(apiErr);
+        } else {
+          setHospitals(results);
+        }
       }
     }
+
     init();
     return () => {
       active = false;
