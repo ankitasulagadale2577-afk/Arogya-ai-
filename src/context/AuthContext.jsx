@@ -47,11 +47,29 @@ export function AuthProvider({ children }) {
 
     async function initializeAuth() {
       try {
-        const { data } = await authService.getSession();
-        if (mounted && data?.session?.user) {
-          setSession(data.session);
-          setUser(data.session.user);
-          await loadUserData(data.session.user);
+        if (isSupabaseConfigured) {
+          const { data } = await authService.getSession();
+          if (mounted && data?.session?.user) {
+            setSession(data.session);
+            setUser(data.session.user);
+            await loadUserData(data.session.user);
+            return;
+          }
+        }
+
+        // Check for local demo session if no live cloud session
+        const savedDemo = localStorage.getItem("arogya_demo_session");
+        if (savedDemo && mounted) {
+          try {
+            const parsed = JSON.parse(savedDemo);
+            if (parsed?.user) {
+              setSession(parsed);
+              setUser(parsed.user);
+              await loadUserData(parsed.user);
+            }
+          } catch {
+            return;
+          }
         }
       } catch (err) {
         console.error("Auth init error:", err);
@@ -73,7 +91,10 @@ export function AuthProvider({ children }) {
       if (currentUser) {
         await loadUserData(currentUser);
       } else {
-        setProfile(null);
+        const savedDemo = localStorage.getItem("arogya_demo_session");
+        if (!savedDemo) {
+          setProfile(null);
+        }
       }
       setLoading(false);
     });
@@ -89,7 +110,7 @@ export function AuthProvider({ children }) {
     const { data, error } = await authService.signIn(email, password);
     if (error) {
       setAuthError(error.message);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, isUnconfirmed: error.isUnconfirmed };
     }
     if (data?.user) {
       setUser(data.user);
@@ -104,19 +125,42 @@ export function AuthProvider({ children }) {
     const { data, error } = await authService.signUp(email, password, fullName, preferredLanguage);
     if (error) {
       setAuthError(error.message);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, isRateLimit: error.isRateLimit };
     }
-    if (data?.user) {
+    if (data?.user && data?.session) {
       setUser(data.user);
       setSession(data.session);
       await loadUserData(data.user);
     }
-    return { success: true, user: data?.user };
+    return { success: true, user: data?.user, session: data?.session };
   };
+
+  const loginAsDemo = useCallback((name = "Health Explorer", lang = "en") => {
+    const demoUser = {
+      id: "demo-user-1",
+      email: "demo@arogyamitra.ai",
+      user_metadata: { full_name: name, preferred_language: lang },
+    };
+    const demoSession = { user: demoUser, access_token: "demo-token" };
+    setUser(demoUser);
+    setSession(demoSession);
+    setProfile({
+      id: demoUser.id,
+      full_name: name,
+      preferred_language: lang,
+      region: "India",
+    });
+    localStorage.setItem("arogya_demo_session", JSON.stringify(demoSession));
+    setLanguage(lang);
+    return { success: true, user: demoUser };
+  }, [setLanguage]);
 
   const logout = async () => {
     setAuthError("");
-    await authService.signOut();
+    localStorage.removeItem("arogya_demo_session");
+    if (isSupabaseConfigured) {
+      await authService.signOut();
+    }
     setUser(null);
     setSession(null);
     setProfile(null);
@@ -165,6 +209,7 @@ export function AuthProvider({ children }) {
         isConfigured: isSupabaseConfigured,
         login,
         signUp,
+        loginAsDemo,
         logout,
         resetPassword,
         updateProfile,

@@ -16,6 +16,10 @@ export const isSupabaseConfigured = Boolean(
   envUrl.startsWith("https://")
 );
 
+export const isRealUuid = (id) =>
+  typeof id === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
 // Fallback dummy URL and anon key to prevent createClient from crashing if unconfigured
 const supabaseUrl = isSupabaseConfigured ? envUrl : "https://placeholder-arogyamitra.supabase.co";
 const supabaseAnonKey = isSupabaseConfigured ? envAnonKey : "placeholder-anon-key";
@@ -28,7 +32,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// Helper for local demo storage when Supabase is not yet connected
+// Helper for local demo storage when Supabase is not yet connected or in demo mode
 function getLocalStorage(key, fallback = []) {
   try {
     const val = localStorage.getItem(key);
@@ -72,6 +76,25 @@ export const authService = {
         },
       },
     });
+
+    if (error) {
+      const isRateLimit =
+        error.code === "over_email_send_rate_limit" ||
+        error.status === 429 ||
+        error.message?.toLowerCase().includes("rate limit");
+
+      return {
+        data,
+        error: {
+          ...error,
+          isRateLimit,
+          message: isRateLimit
+            ? "Supabase email rate limit exceeded (free tier allows only 3 confirmation emails/hour). In your Supabase Dashboard, go to Authentication -> Providers -> Email and turn OFF 'Confirm email' to allow instant sign-up without rate limits."
+            : error.message,
+        },
+      };
+    }
+
     return { data, error };
   },
 
@@ -86,7 +109,23 @@ export const authService = {
       return { data: { user: demoUser, session: { user: demoUser } }, error: null };
     }
 
-    return await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      if (error.message?.toLowerCase().includes("email not confirmed")) {
+        return {
+          data,
+          error: {
+            ...error,
+            isUnconfirmed: true,
+            message:
+              "Email is not confirmed yet. In your Supabase Dashboard -> Authentication -> Users, click your email and choose 'Confirm user', or turn OFF 'Confirm email' under Providers -> Email.",
+          },
+        };
+      }
+      return { data, error };
+    }
+
+    return { data, error };
   },
 
   async signOut() {
@@ -94,6 +133,7 @@ export const authService = {
       localStorage.removeItem("arogya_demo_session");
       return { error: null };
     }
+    localStorage.removeItem("arogya_demo_session");
     return await supabase.auth.signOut();
   },
 
@@ -133,7 +173,7 @@ export const authService = {
 // ==============================================================================
 export const profileService = {
   async getProfile(userId) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       return {
         data: getLocalStorage("arogya_user_profile", {
           id: userId || "demo-user-1",
@@ -155,7 +195,7 @@ export const profileService = {
   },
 
   async updateProfile(userId, updates) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       const current = getLocalStorage("arogya_user_profile", {});
       const updated = { ...current, ...updates, id: userId, updated_at: new Date().toISOString() };
       setLocalStorage("arogya_user_profile", updated);
@@ -172,7 +212,7 @@ export const profileService = {
   },
 
   async getPreferences(userId) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       return {
         data: getLocalStorage("arogya_user_prefs", { compact_cards: false, notifications_enabled: false }),
         error: null,
@@ -189,7 +229,7 @@ export const profileService = {
   },
 
   async updatePreferences(userId, prefs) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       setLocalStorage("arogya_user_prefs", prefs);
       return { data: prefs, error: null };
     }
@@ -209,7 +249,7 @@ export const profileService = {
 // ==============================================================================
 export const chatDbService = {
   async getConversations(userId) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       return { data: getLocalStorage("arogya_conversations", []), error: null };
     }
 
@@ -223,7 +263,7 @@ export const chatDbService = {
   },
 
   async createConversation(userId, title, language = "en") {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       const newConv = {
         id: "conv-" + Date.now(),
         user_id: userId,
@@ -247,7 +287,7 @@ export const chatDbService = {
   },
 
   async getMessages(conversationId) {
-    if (!isSupabaseConfigured || !conversationId) {
+    if (!isSupabaseConfigured || !isRealUuid(conversationId)) {
       const allMsgs = getLocalStorage("arogya_chat_messages", {});
       return { data: allMsgs[conversationId] || [], error: null };
     }
@@ -262,7 +302,7 @@ export const chatDbService = {
   },
 
   async addMessage(conversationId, userId, role, content) {
-    if (!isSupabaseConfigured || !conversationId) {
+    if (!isSupabaseConfigured || !isRealUuid(conversationId) || !isRealUuid(userId)) {
       const msg = {
         id: "msg-" + Date.now() + Math.random(),
         conversation_id: conversationId,
@@ -293,7 +333,7 @@ export const chatDbService = {
   },
 
   async deleteConversation(conversationId) {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !isRealUuid(conversationId)) {
       const list = getLocalStorage("arogya_conversations", []).filter((c) => c.id !== conversationId);
       setLocalStorage("arogya_conversations", list);
       return { error: null };
@@ -308,7 +348,7 @@ export const chatDbService = {
 // ==============================================================================
 export const vaccinationService = {
   async getReminders(userId) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       return { data: getLocalStorage("arogya_vaccine_reminders", []), error: null };
     }
 
@@ -322,7 +362,7 @@ export const vaccinationService = {
   },
 
   async addReminder(userId, { recipient_name, vaccine_name, planned_date, notes }) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       const reminder = {
         id: "rem-" + Date.now(),
         user_id: userId,
@@ -356,7 +396,7 @@ export const vaccinationService = {
   },
 
   async toggleComplete(reminderId, isCompleted) {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !isRealUuid(reminderId)) {
       const list = getLocalStorage("arogya_vaccine_reminders", []).map((r) =>
         r.id === reminderId ? { ...r, is_completed: isCompleted } : r
       );
@@ -371,7 +411,7 @@ export const vaccinationService = {
   },
 
   async deleteReminder(reminderId) {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !isRealUuid(reminderId)) {
       const list = getLocalStorage("arogya_vaccine_reminders", []).filter((r) => r.id !== reminderId);
       setLocalStorage("arogya_vaccine_reminders", list);
       return { error: null };
@@ -386,7 +426,7 @@ export const vaccinationService = {
 // ==============================================================================
 export const emergencyContactService = {
   async getContacts(userId) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       return { data: getLocalStorage("arogya_emergency_contacts", []), error: null };
     }
 
@@ -400,7 +440,7 @@ export const emergencyContactService = {
   },
 
   async addContact(userId, { name, phone, relationship }) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       const contact = {
         id: "cnt-" + Date.now(),
         user_id: userId,
@@ -424,7 +464,7 @@ export const emergencyContactService = {
   },
 
   async deleteContact(contactId) {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !isRealUuid(contactId)) {
       const list = getLocalStorage("arogya_emergency_contacts", []).filter((c) => c.id !== contactId);
       setLocalStorage("arogya_emergency_contacts", list);
       return { error: null };
@@ -456,7 +496,7 @@ export const articleService = {
   },
 
   async getSavedArticleIds(userId) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       return { data: getLocalStorage("arogya_saved_articles", []), error: null };
     }
 
@@ -470,7 +510,7 @@ export const articleService = {
   },
 
   async toggleSaveArticle(userId, articleId, isSaved) {
-    if (!isSupabaseConfigured || !userId) {
+    if (!isSupabaseConfigured || !isRealUuid(userId)) {
       let saved = getLocalStorage("arogya_saved_articles", []);
       if (isSaved) {
         saved = [...new Set([...saved, articleId])];
