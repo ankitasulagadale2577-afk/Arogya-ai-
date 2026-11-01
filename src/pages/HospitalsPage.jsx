@@ -316,6 +316,7 @@ export default function HospitalsPage() {
             <LeafletMap
               center={center}
               zoom={radius > 8000 ? 12 : 14}
+              radius={radius}
               userLocation={userLocation}
               hospitals={filteredHospitals}
               selectedHospital={selectedHospital}

@@ -60,6 +60,7 @@ const createHospitalIcon = (isSelected = false) =>
 export default function LeafletMap({
   center = [18.5204, 73.8567],
   zoom = 13,
+  radius = 5000,
   userLocation = null,
   hospitals = [],
   selectedHospital = null,
@@ -125,21 +126,36 @@ export default function LeafletMap({
     }
   }, [center, zoom]);
 
-  // Update markers
+  // Update markers and radius circle
   useEffect(() => {
     if (!mapInstanceRef.current || !markersLayerRef.current) return;
 
     markersLayerRef.current.clearLayers();
 
-    // 1. User Location Marker
+    // 1. Search Radius Circle (e.g. 5 km perimeter)
+    const perimeterCenter = userLocation && userLocation.lat ? [userLocation.lat, userLocation.lon] : center;
+    if (perimeterCenter && perimeterCenter[0] && perimeterCenter[1] && radius) {
+      const circle = L.circle(perimeterCenter, {
+        radius: radius,
+        color: "#0866f5",
+        weight: 2,
+        opacity: 0.65,
+        fillColor: "#0866f5",
+        fillOpacity: 0.05,
+        dashArray: "6, 8",
+      }).bindPopup(`<b>${(radius / 1000).toFixed(0)} km Search Perimeter</b><br/><span style="font-size: 11px; color: #555;">Displaying hospitals within this zone</span>`);
+      markersLayerRef.current.addLayer(circle);
+    }
+
+    // 2. User Location Marker
     if (userLocation && userLocation.lat && userLocation.lon) {
       const userMarker = L.marker([userLocation.lat, userLocation.lon], {
         icon: createUserIcon(),
-      }).bindPopup("<b>Your Current Location</b>");
+      }).bindPopup("<b>📍 Your Current Location</b><br/><small>Center of 5 km search area</small>");
       markersLayerRef.current.addLayer(userMarker);
     }
 
-    // 2. Hospital Markers
+    // 3. Real Nearby Hospital Markers
     hospitals.forEach((h) => {
       if (!h.lat || !h.lon) return;
 
@@ -151,11 +167,11 @@ export default function LeafletMap({
       const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lon}`;
 
       const popupContent = `
-        <div style="font-family: inherit; font-size: 13px; line-height: 1.4; padding: 2px; min-width: 200px;">
+        <div style="font-family: inherit; font-size: 13px; line-height: 1.4; padding: 2px; min-width: 220px;">
           <strong style="color: #142f59; font-size: 14px; display: block; margin-bottom: 4px;">${h.name}</strong>
           <div style="color: #6680a1; font-size: 11px; margin-bottom: 6px;">${h.address}</div>
           <div style="color: #0866f5; font-weight: bold; font-size: 12px; margin-bottom: 4px;">
-            ${h.distance ? h.distance.toFixed(1) + " km away" : ""} ${h.emergency ? "• 🚨 24/7 Emergency" : ""}
+            ${h.distance ? h.distance.toFixed(2) + " km away" : ""} ${h.emergency ? "• 🚨 24/7 Emergency" : ""}
           </div>
           ${h.phone ? `<div style="margin: 4px 0;">📞 <a href="tel:${h.phone}" style="color: #e63d58; font-weight: bold;">${h.phone}</a></div>` : ""}
           <div style="margin-top: 8px;">
@@ -163,11 +179,12 @@ export default function LeafletMap({
               display: inline-block;
               background: #0866f5;
               color: white;
-              padding: 5px 10px;
-              border-radius: 6px;
+              padding: 6px 12px;
+              border-radius: 8px;
               text-decoration: none;
               font-size: 11px;
               font-weight: bold;
+              box-shadow: 0 2px 6px rgba(8, 102, 245, 0.3);
             ">Get Directions →</a>
           </div>
         </div>
@@ -185,7 +202,7 @@ export default function LeafletMap({
         marker.openPopup();
       }
     });
-  }, [hospitals, userLocation, selectedHospital, onSelectHospital]);
+  }, [center, hospitals, radius, userLocation, selectedHospital, onSelectHospital]);
 
   // If a hospital is selected, center on it smoothly
   useEffect(() => {
