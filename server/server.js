@@ -1,8 +1,15 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.resolve(__dirname, "../dist");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -189,6 +196,16 @@ Essential Rules:
     res.status(500).json({ error: "Internal server error while processing AI request." });
   }
 });
+
+// Serve built frontend assets in production if dist directory exists
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api/")) return next();
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`ArogyaMitra AI Secure Server running on port ${PORT}`);
